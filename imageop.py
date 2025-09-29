@@ -1,10 +1,11 @@
-import os, shutil
+import os
+import shutil
 from PIL import Image
 
 def get_size(b, factor=1024, suffix="B"):
     """
-        byte formatting:
-            1,253,656 -> 1.20MB
+    Byte formatting:
+        1,253,656 -> 1.20MB
     """
     for unit in ["", "K", "M", "G", "T"]:
         if b < factor:
@@ -13,56 +14,83 @@ def get_size(b, factor=1024, suffix="B"):
     return f"{b:.2f}Y{suffix}"
 
 def compress_img(image_name, new_size_ratio=0.9, quality=90, width=None, height=None, to_jpg=True, output_name=None):
-    # load the image to memory
+    # Load the image to memory
     img = Image.open(image_name)
-    # print the original image shape
+    # Print the original image shape
     print("[*] Image shape:", img.size)
-    # get the original image size in bytes
+    # Get the original image size in bytes
     image_size = os.path.getsize(image_name)
-    # print the size before compression/resizing
+    # Print the size before compression/resizing
     print("[*] Size before compression:", get_size(image_size))
+    
     if new_size_ratio < 1.0:
-        # if resizing ratio is below 1.0, then multiply width & height with this ratio to reduce image size
-        img = img.resize((int(img.size[0] * new_size_ratio), int(img.size[1] * new_size_ratio)), Image.ANTIALIAS)
-        # print new image shape
+        # If resizing ratio is below 1.0, then multiply width & height with this ratio to reduce image size
+        # Use Image.LANCZOS instead of deprecated Image.ANTIALIAS
+        img = img.resize((int(img.size[0] * new_size_ratio), int(img.size[1] * new_size_ratio)), Image.LANCZOS)
+        # Print new image shape
         print("[+] New Image shape:", img.size)
     elif width and height:
-        # if width and height are set, resize with them instead
-        img = img.resize((width, height), Image.ANTIALIAS)
-        # print new image shape
+        # If width and height are set, resize with them instead
+        img = img.resize((width, height), Image.LANCZOS)
+        # Print new image shape
         print("[+] New Image shape:", img.size)
-    # split the filename and extension
+    
+    # Split the filename and extension
     filename, ext = os.path.splitext(image_name)
     if output_name:
         filename = output_name
-    # make new filename appending _compressed to the original file name
+    
+    # Make new filename appending _compressed to the original file name
     if to_jpg:
-        # change the extension to JPEG
+        # Change the extension to JPEG
         new_filename = f"{filename}_compressed.jpg"
     else:
-        # retain the same extension of the original image
+        # Retain the same extension of the original image
         new_filename = f"{filename}_compressed{ext}"
+    
+    # Create Compressed directory if it doesn't exist
+    if not os.path.exists('Compressed'):
+        os.mkdir('Compressed')
+    
     try:
-        if not (os.path.exists('/Compressed')):
-            os.mkdir('Compressed')
-        # save the image with the corresponding quality and optimize set to True
+        # Handle images with transparency
+        if img.mode in ('RGBA', 'LA', 'P'):
+            if to_jpg:
+                # JPEG doesn't support transparency, convert to RGB with white background
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = background
+            else:
+                # Keep transparency for PNG and other formats
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+        elif img.mode not in ('RGB', 'L'):
+            # Convert other modes to RGB
+            img = img.convert('RGB')
+        
+        # Save the image with the corresponding quality and optimize set to True
         img.save(new_filename, quality=quality, optimize=True)
     except OSError:
-        # convert the image to RGB mode first
+        # Fallback: convert the image to RGB mode
         img = img.convert("RGB")
-        # save the image with the corresponding quality and optimize set to True
+        # Save the image with the corresponding quality and optimize set to True
         img.save(new_filename, quality=quality, optimize=True)
+    
     new_filepath = f"Compressed/{new_filename}"
-    # move the new file to the 'Compressed' directory
+    # Move the new file to the 'Compressed' directory
     shutil.move(new_filename, new_filepath)
     print("[+] New file saved:", new_filepath)
-    # get the new image size in bytes
+    
+    # Get the new image size in bytes
     new_image_size = os.path.getsize(new_filepath)
-    # print the new size in a good format
+    # Print the new size in a good format
     print("[+] Size after compression:", get_size(new_image_size))
-    # calculate the saving bytes
+    
+    # Calculate the saving bytes
     saving_diff = new_image_size - image_size
-    # print the saving percentage
+    # Print the saving percentage
     print(f"[+] Image size change: {saving_diff/image_size*100:.2f}% of the original image size.")
 
 if __name__ == "__main__":
@@ -76,7 +104,8 @@ if __name__ == "__main__":
     parser.add_argument("-hh", "--height", type=int, help="The new height for the image, make sure to set it with the `width` parameter")
     parser.add_argument("-o", "--output-name", help="Output file name")
     args = parser.parse_args()
-    # print the passed arguments
+    
+    # Print the passed arguments
     print("="*50)
     print("[*] Image:", args.image)
     print("[*] To JPEG:", args.to_jpg)
@@ -86,11 +115,12 @@ if __name__ == "__main__":
         print("[*] Width:", args.width)
         print("[*] Height:", args.height)
     print("="*50)
-    # TODO: Check if img is * and if so, compress all images in current directory
+    
+    # Check if 'all' is specified to compress all images in current directory
     if args.image == 'all':
-        image_list = [_ for _ in os.listdir() if _.endswith('.jpg') or _.endswith('.jpeg') or _.endswith('.JPG')]
+        image_list = [_ for _ in os.listdir() if _.endswith(('.jpg', '.jpeg', '.JPG', '.JPEG', '.png', '.PNG'))]
         for img in image_list:
-            compress_img(img, args.resize_ratio, args.quality, args.width, args.height, args.to_jpg)
+            compress_img(img, args.resize_ratio, args.quality, args.width, args.height, args.to_jpg, args.output_name)
     else:
-        # compress the image
-        compress_img(args.image, args.resize_ratio, args.quality, args.width, args.height, args.to_jpg)
+        # Compress the image
+        compress_img(args.image, args.resize_ratio, args.quality, args.width, args.height, args.to_jpg, args.output_name)
